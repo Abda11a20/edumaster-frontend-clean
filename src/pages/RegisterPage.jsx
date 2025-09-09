@@ -120,7 +120,17 @@ const RegisterPage = () => {
     setIsLoading(true)
 
     try {
-      const result = await register(formData)
+      // إعداد البيانات للإرسال بشكل يتوافق مع ما يتوقعه الخادم
+      const registrationData = {
+        fullName: formData.fullName,
+        email: formData.email,
+        password: formData.password,
+        cpassword: formData.cpassword,
+        phoneNumber: formData.phoneNumber,
+        classLevel: formData.classLevel
+      }
+
+      const result = await register(registrationData)
       
       if (result.success) {
         toast({
@@ -136,6 +146,7 @@ const RegisterPage = () => {
         })
       }
     } catch (error) {
+      console.error('Registration error:', error)
       toast({
         title: 'خطأ في الاتصال',
         description: 'تحقق من اتصالك بالإنترنت وحاول مرة أخرى',
@@ -371,4 +382,3 @@ const RegisterPage = () => {
 }
 
 export default RegisterPage
-

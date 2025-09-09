@@ -16,7 +16,10 @@ import {
   Moon,
   GraduationCap,
   Target,
-  Zap
+  Zap,
+  Mail,
+  Phone,
+  MessageCircle
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -25,6 +28,7 @@ import { useAuth } from '../contexts/AuthContext'
 
 const LandingPage = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const [showVideo, setShowVideo] = useState(false)
   const { theme, toggleTheme } = useTheme()
   const { isAuthenticated } = useAuth()
   const navigate = useNavigate()
@@ -75,13 +79,13 @@ const LandingPage = () => {
     {
       name: 'فاطمة علي',
       role: 'طالبة الصف الثاني الثانوي',
-      content: 'الدروس واضحة والامتحانات تحاكي الامتحانات الحقيقية',
+      content: 'الدروس واضحة والامتحانات زي الامتحانات الحقيقية',
       rating: 5
     },
     {
       name: 'محمد حسن',
       role: 'طالب الصف الأول الثانوي',
-      content: 'أفضل منصة تعليمية استخدمتها على الإطلاق',
+      content: 'أفضل منصة تعليمية استخدمتها في حياتي',
       rating: 5
     }
   ]
@@ -184,9 +188,9 @@ const LandingPage = () => {
               transition={{ duration: 0.6 }}
             >
               <h1 className="text-4xl md:text-6xl font-bold text-gray-900 dark:text-white mb-6">
-                مستقبل التعليم
+                مستقبلك التعليمي
                 <span className="block text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-purple-600">
-                  يبدأ هنا
+                  يبدأ من هنا
                 </span>
               </h1>
               <p className="text-xl text-gray-600 dark:text-gray-300 mb-8 max-w-3xl mx-auto">
@@ -199,7 +203,12 @@ const LandingPage = () => {
                     <ArrowRight className="ml-2 h-5 w-5" />
                   </Button>
                 </Link>
-                <Button variant="outline" size="lg" className="text-lg px-8 py-3">
+                <Button 
+                  variant="outline" 
+                  size="lg" 
+                  className="text-lg px-8 py-3"
+                  onClick={() => setShowVideo(true)}
+                >
                   <Play className="mr-2 h-5 w-5" />
                   شاهد العرض التوضيحي
                 </Button>
@@ -238,7 +247,7 @@ const LandingPage = () => {
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-16">
             <h2 className="text-3xl md:text-4xl font-bold text-gray-900 dark:text-white mb-4">
-              لماذا تختار EduMaster؟
+              لماذا تختار EduMaster?
             </h2>
             <p className="text-xl text-gray-600 dark:text-gray-300 max-w-3xl mx-auto">
               نوفر لك أحدث التقنيات التعليمية لضمان تجربة تعلم فريدة ومثمرة
@@ -374,21 +383,66 @@ const LandingPage = () => {
             
             <div>
               <h3 className="text-lg font-semibold mb-4">تواصل معنا</h3>
-              <ul className="space-y-2 text-gray-400">
-                <li>البريد الإلكتروني: info@edumaster.com</li>
-                <li>الهاتف: +20 123 456 7890</li>
+              <ul className="space-y-3 text-gray-400">
+                <li className="flex items-center">
+                  <Mail className="h-4 w-4 ml-2" />
+                  <a href="mailto:abdallarageb662@gmail.com" className="hover:text-white transition-colors">
+                    abdallarageb662@gmail.com
+                  </a>
+                </li>
+                <li className="flex items-center">
+                  <Phone className="h-4 w-4 ml-2" />
+                  <a href="tel:+201016864615" className="hover:text-white transition-colors">
+                    +201016864615
+                  </a>
+                </li>
+                <li className="flex items-center">
+                  <MessageCircle className="h-5 w-5 ml-2 text-green-500" />
+                  <a 
+                    href="https://wa.me/201016864615" 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="flex items-center bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-full transition-colors"
+                  >
+                    تواصل عبر واتساب
+                  </a>
+                </li>
               </ul>
             </div>
           </div>
           
           <div className="border-t border-gray-800 mt-8 pt-8 text-center text-gray-400">
-            <p>&copy; 2024 EduMaster. جميع الحقوق محفوظة.</p>
+            <p>&copy; 2025 EduMaster. جميع الحقوق محفوظة.</p>
           </div>
         </div>
       </footer>
+
+      {/* Video Modal */}
+      {showVideo && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+          <div className="relative bg-black rounded-lg overflow-hidden max-w-4xl w-full">
+            <button 
+              className="absolute top-4 right-4 text-white z-10 bg-gray-800 rounded-full p-2 hover:bg-gray-700"
+              onClick={() => setShowVideo(false)}
+            >
+              <X className="h-6 w-6" />
+            </button>
+            <div className="aspect-video">
+              <video 
+                controls 
+                autoPlay 
+                className="w-full h-full"
+                onEnded={() => setShowVideo(false)}
+              >
+                <source src="/videos/demo-video.mp4" type="video/mp4" />
+                متصفحك لا يدعم تشغيل الفيديو
+              </video>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
 export default LandingPage
-

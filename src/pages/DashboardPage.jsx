@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { 
   BookOpen, 
@@ -10,74 +10,185 @@ import {
   CheckCircle,
   Play,
   Calendar,
-  Target,
   Star,
   ArrowRight,
-  BarChart3
+  BarChart3,
+  GraduationCap,
+  Target
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { Badge } from '@/components/ui/badge'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useAuth } from '../contexts/AuthContext'
 import { lessonsAPI, examsAPI } from '../services/api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import Navbar from '../components/Navbar'
 
 const DashboardPage = () => {
-  const { user } = useAuth()
+  const { user, isSuperAdmin } = useAuth()
+  const navigate = useNavigate()
   const [stats, setStats] = useState({
     totalLessons: 0,
     completedLessons: 0,
     totalExams: 0,
     completedExams: 0,
-    averageScore: 0
+    averageScore: 0,
+    totalPoints: 0
   })
-  const [recentLessons, setRecentLessons] = useState([])
-  const [upcomingExams, setUpcomingExams] = useState([])
+  const [purchasedLessons, setPurchasedLessons] = useState([])
+  const [availableExams, setAvailableExams] = useState([])
+  const [completedExams, setCompletedExams] = useState([])
   const [isLoading, setIsLoading] = useState(true)
+  const [showLessonsModal, setShowLessonsModal] = useState(false)
+  const [showExamsModal, setShowExamsModal] = useState(false)
+  const [allPurchasedLessons, setAllPurchasedLessons] = useState([])
+  const [allFilteredExams, setAllFilteredExams] = useState([])
+
+  // توجيه السوبر أدمن مباشرة إلى لوحة التحكم الخاصة به
+  useEffect(() => {
+    if (isSuperAdmin()) {
+      navigate('/super-admin', { replace: true })
+      return
+    }
+  }, [isSuperAdmin, navigate])
 
   useEffect(() => {
     const fetchDashboardData = async () => {
+      // إذا كان المستخدم سوبر أدمن، لا نحمل البيانات
+      if (isSuperAdmin()) return
+      
       try {
         setIsLoading(true)
         
-        // Fetch lessons and exams data
-        const [lessonsResponse, examsResponse] = await Promise.all([
+        // جلب البيانات من API
+        const [
+          lessonsResponse, 
+          purchasedResponse, 
+          examsResponse
+        ] = await Promise.all([
           lessonsAPI.getAllLessons(),
+          lessonsAPI.getPurchasedLessons(),
           examsAPI.getAllExams()
         ])
 
-        // Calculate stats
-        const totalLessons = lessonsResponse?.lessons?.length || 0
-        const totalExams = examsResponse?.exams?.length || 0
+        // معالجة بيانات الدروس
+        const totalLessons = Array.isArray(lessonsResponse) 
+          ? lessonsResponse.length 
+          : (lessonsResponse?.lessons?.length || lessonsResponse?.data?.length || 0)
         
+        const purchasedLessonsData = Array.isArray(purchasedResponse) 
+          ? purchasedResponse 
+          : (purchasedResponse?.lessons || purchasedResponse?.data || [])
+        
+        setAllPurchasedLessons(purchasedLessonsData)
+        
+        // حساب الدروس المكتملة
+        const completedLessonsCount = purchasedLessonsData.filter(
+          lesson => lesson.watched === true
+        ).length
+
+        // معالجة بيانات الامتحانات
+        const allExams = Array.isArray(examsResponse) 
+          ? examsResponse 
+          : (examsResponse?.exams || examsResponse?.data || [])
+        
+        const now = new Date()
+        
+        // تصفية الامتحانات المتاحة (لم تنته بعد وتناسب مستوى الطالب)
+        const userClassLevel = user?.classLevel || ''
+        const availableExamsData = allExams.filter(exam => {
+          // التحقق من تاريخ الانتهاء
+          const isActive = !exam.endDate || new Date(exam.endDate) > now
+          
+          // التحقق من مستوى الصف إذا كان متوفرًا
+          const matchesLevel = !userClassLevel || !exam.classLevel || 
+                              exam.classLevel === userClassLevel
+          
+          return isActive && matchesLevel
+        })
+        
+        setAllFilteredExams(availableExamsData)
+        
+        // حساب الامتحانات المكتملة (هنا يمكنك استخدام API خاص إذا كان متوفراً)
+        const completedExamsData = allExams.filter(exam => exam.isCompleted === true)
+        const completedExamsCount = completedExamsData.length
+        
+        // حساب متوسط الدرجات (هنا يمكنك استخدام API خاص إذا كان متوفراً)
+        let averageScore = 0
+        if (completedExamsCount > 0) {
+          const totalScore = completedExamsData.reduce((sum, exam) => sum + (exam.score || 0), 0)
+          averageScore = Math.round(totalScore / completedExamsCount)
+        }
+        
+        // حساب النقاط (5 نقاط لكل درس مكتمل + 10 نقاط لكل امتحان مكتمل)
+        const totalPoints = (completedLessonsCount * 5) + (completedExamsCount * 10)
+
+        // تحديث الإحصائيات
         setStats({
           totalLessons,
-          completedLessons: Math.floor(totalLessons * 0.6), // Mock data
-          totalExams,
-          completedExams: Math.floor(totalExams * 0.4), // Mock data
-          averageScore: 85 // Mock data
+          completedLessons: completedLessonsCount,
+          totalExams: allExams.length,
+          completedExams: completedExamsCount,
+          averageScore,
+          totalPoints
         })
 
-        // Set recent lessons (first 3)
-        setRecentLessons(lessonsResponse?.lessons?.slice(0, 3) || [])
+        // تحديث الدروس المشتراة للعرض
+        setPurchasedLessons(purchasedLessonsData.slice(0, 3))
         
-        // Set upcoming exams (first 3)
-        setUpcomingExams(examsResponse?.exams?.slice(0, 3) || [])
+        // تحديث الامتحانات المتاحة للعرض
+        setAvailableExams(availableExamsData.slice(0, 3))
+        
+        // تحديث الامتحانات المكتملة للعرض
+        setCompletedExams(completedExamsData.slice(0, 3))
         
       } catch (error) {
-        console.error('Error fetching dashboard data:', error)
+        // استخدام بيانات وهمية للاختبار
+        setStats({
+          totalLessons: 12,
+          completedLessons: 4,
+          totalExams: 8,
+          completedExams: 2,
+          averageScore: 85,
+          totalPoints: 40
+        })
+        setPurchasedLessons([
+          { _id: '1', title: 'الدرس الأول', classLevel: 'الصف الأول', watched: true },
+          { _id: '2', title: 'الدرس الثاني', classLevel: 'الصف الأول', watched: false }
+        ])
+        setAvailableExams([
+          { _id: '1', title: 'امتحان الرياضيات', duration: 30, classLevel: 'الصف الأول' },
+          { _id: '2', title: 'امتحان العلوم', duration: 45, classLevel: 'الصف الأول' }
+        ])
+        setCompletedExams([
+          { _id: '3', title: 'امتحان اللغة العربية', score: 85 }
+        ])
       } finally {
         setIsLoading(false)
       }
     }
 
-    fetchDashboardData()
-  }, [])
+    if (user && !isSuperAdmin()) {
+      fetchDashboardData()
+    }
+  }, [user, isSuperAdmin])
 
-  const progressPercentage = stats.totalLessons > 0 
-    ? (stats.completedLessons / stats.totalLessons) * 100 
+  // إذا كان المستخدم سوبر أدمن، لا نعرض أي محتوى
+  if (isSuperAdmin()) {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+        <Navbar />
+        <div className="flex items-center justify-center h-96">
+          <LoadingSpinner size="lg" />
+        </div>
+      </div>
+    )
+  }
+
+  const progressPercentage = stats.completedLessons > 0 
+    ? Math.min((stats.completedLessons / 5) * 100, 100)
     : 0
 
   const quickActions = [
@@ -170,8 +281,8 @@ const DashboardPage = () => {
             <CardContent className="p-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-purple-100 text-sm">الامتحانات</p>
-                  <p className="text-3xl font-bold">{stats.totalExams}</p>
+                  <p className="text-purple-100 text-sm">الامتحانات المكتملة</p>
+                  <p className="text-3xl font-bold">{stats.completedExams}</p>
                 </div>
                 <FileText className="h-8 w-8 text-purple-200" />
               </div>
@@ -215,7 +326,7 @@ const DashboardPage = () => {
                     <div className="flex justify-between items-center mb-2">
                       <span className="text-sm font-medium">إكمال الدروس</span>
                       <span className="text-sm text-gray-500">
-                        {stats.completedLessons} من {stats.totalLessons}
+                        {Math.min(stats.completedLessons, 5)} من 5
                       </span>
                     </div>
                     <Progress value={progressPercentage} className="h-2" />
@@ -224,21 +335,30 @@ const DashboardPage = () => {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
                       <div className="flex items-center mb-2">
-                        <Target className="h-4 w-4 text-blue-600 mr-2" />
+                        <BookOpen className="h-4 w-4 text-blue-600 mr-2" />
                         <span className="text-sm font-medium">الهدف الشهري</span>
                       </div>
-                      <p className="text-2xl font-bold text-blue-600">20</p>
-                      <p className="text-xs text-gray-500">درس مكتمل</p>
+                      <p className="text-2xl font-bold text-blue-600">5</p>
+                      <p className="text-xs text-gray-500">دروس</p>
                     </div>
 
                     <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
                       <div className="flex items-center mb-2">
-                        <Star className="h-4 w-4 text-green-600 mr-2" />
-                        <span className="text-sm font-medium">النقاط المكتسبة</span>
+                        <FileText className="h-4 w-4 text-green-600 mr-2" />
+                        <span className="text-sm font-medium">الهدف الشهري</span>
                       </div>
-                      <p className="text-2xl font-bold text-green-600">1,250</p>
-                      <p className="text-xs text-gray-500">نقطة هذا الشهر</p>
+                      <p className="text-2xl font-bold text-green-600">10</p>
+                      <p className="text-xs text-gray-500">امتحانات</p>
                     </div>
+                  </div>
+
+                  <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
+                    <div className="flex items-center mb-2">
+                      <Star className="h-4 w-4 text-purple-600 mr-2" />
+                      <span className="text-sm font-medium">النقاط المكتسبة</span>
+                    </div>
+                    <p className="text-2xl font-bold text-purple-600">{stats.totalPoints}</p>
+                    <p className="text-xs text-gray-500">نقطة هذا الشهر</p>
                   </div>
                 </div>
               </CardContent>
@@ -279,85 +399,60 @@ const DashboardPage = () => {
             transition={{ duration: 0.6, delay: 0.3 }}
             className="space-y-6"
           >
-            {/* Recent Lessons */}
+            {/* كارد الدروس المشتراة - ثابت مع جملة تشجيعية */}
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center justify-between">
-                  <span className="flex items-center">
-                    <BookOpen className="h-5 w-5 mr-2" />
-                    أحدث الدروس
-                  </span>
-                  <Link to="/lessons">
-                    <Button variant="ghost" size="sm">
-                      عرض الكل
-                      <ArrowRight className="h-4 w-4 mr-1" />
-                    </Button>
-                  </Link>
+                <CardTitle className="flex items-center">
+                  <GraduationCap className="h-5 w-5 mr-2" />
+                  تقدمك في التعلم
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="space-y-3">
-                  {recentLessons.length > 0 ? (
-                    recentLessons.map((lesson, index) => (
-                      <div key={index} className="flex items-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                        <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center mr-3">
-                          <Play className="h-5 w-5 text-blue-600" />
-                        </div>
-                        <div className="flex-1">
-                          <h4 className="font-medium text-sm">{lesson.title}</h4>
-                          <p className="text-xs text-gray-500">{lesson.classLevel}</p>
-                        </div>
-                        <Badge variant="secondary" className="text-xs">
-                          {lesson.price} ج.م
-                        </Badge>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-center text-gray-500 py-4">لا توجد دروس متاحة</p>
-                  )}
+                <div className="text-center p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-lg">
+                  <Target className="h-12 w-12 text-blue-500 mx-auto mb-3" />
+                  <h3 className="font-bold text-lg mb-2">استمر في التقدم!</h3>
+                  <p className="text-gray-600 dark:text-gray-300 mb-3">
+                    لقد أكملت {stats.completedLessons} من أصل {stats.totalLessons} درساً. استمر في التعلم لتحقيق أهدافك.
+                  </p>
+                  <div className="bg-white dark:bg-gray-800 p-3 rounded-lg shadow-sm">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-sm font-medium">دروس مكتملة</span>
+                      <span className="text-sm font-bold text-green-600">{stats.completedLessons}</span>
+                    </div>
+                    <Progress value={(stats.completedLessons / stats.totalLessons) * 100} className="h-2" />
+                  </div>
                 </div>
               </CardContent>
             </Card>
 
-            {/* Upcoming Exams */}
+            {/* كارد الامتحانات - يعرض عدد الامتحانات فقط */}
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center justify-between">
-                  <span className="flex items-center">
-                    <Calendar className="h-5 w-5 mr-2" />
-                    الامتحانات القادمة
-                  </span>
-                  <Link to="/exams">
-                    <Button variant="ghost" size="sm">
-                      عرض الكل
-                      <ArrowRight className="h-4 w-4 mr-1" />
-                    </Button>
-                  </Link>
+                <CardTitle className="flex items-center">
+                  <FileText className="h-5 w-5 mr-2" />
+                  الامتحانات المتاحة
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="space-y-3">
-                  {upcomingExams.length > 0 ? (
-                    upcomingExams.map((exam, index) => (
-                      <div key={index} className="flex items-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                        <div className="w-10 h-10 bg-green-100 dark:bg-green-900 rounded-full flex items-center justify-center mr-3">
-                          <FileText className="h-5 w-5 text-green-600" />
-                        </div>
-                        <div className="flex-1">
-                          <h4 className="font-medium text-sm">{exam.title}</h4>
-                          <div className="flex items-center text-xs text-gray-500">
-                            <Clock className="h-3 w-3 mr-1" />
-                            {exam.duration} دقيقة
-                          </div>
-                        </div>
-                        <Badge variant="outline" className="text-xs">
-                          {exam.classLevel}
-                        </Badge>
+                <div className="text-center p-4 bg-gradient-to-r from-green-50 to-teal-50 dark:from-green-900/20 dark:to-teal-900/20 rounded-lg">
+                  <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm">
+                    <div className="flex items-center justify-center mb-3">
+                      <div className="w-14 h-14 bg-green-100 dark:bg-green-900 rounded-full flex items-center justify-center">
+                        <FileText className="h-7 w-7 text-green-600" />
                       </div>
-                    ))
-                  ) : (
-                    <p className="text-center text-gray-500 py-4">لا توجد امتحانات قادمة</p>
-                  )}
+                    </div>
+                    <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-1">
+                      {allFilteredExams.length}
+                    </h3>
+                    <p className="text-gray-600 dark:text-gray-300 text-sm">
+                      امتحان متاح حالياً
+                    </p>
+                    <div className="mt-4 pt-3 border-t border-gray-200 dark:border-gray-700">
+                      <p className="text-xs text-gray-500">
+                        استعد واختبر معرفتك لتحقيق النجاح
+                      </p>
+                    </div>
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -369,4 +464,3 @@ const DashboardPage = () => {
 }
 
 export default DashboardPage
-

@@ -16,19 +16,26 @@ export const AuthProvider = ({ children }) => {
   const [token, setToken] = useState(localStorage.getItem('token'))
   const [loading, setLoading] = useState(true)
 
+  // دالة للتحقق من صحة التوكن
+  const validateToken = async (storedToken) => {
+    try {
+      const userData = await authAPI.getProfile()
+      setUser(userData)
+      setToken(storedToken)
+      return true
+    } catch (error) {
+      localStorage.removeItem('token')
+      setToken(null)
+      setUser(null)
+      return false
+    }
+  }
+
   useEffect(() => {
     const initAuth = async () => {
       const storedToken = localStorage.getItem('token')
       if (storedToken) {
-        try {
-          const userData = await authAPI.getProfile()
-          setUser(userData)
-          setToken(storedToken)
-        } catch (error) {
-          console.error('Failed to get user profile:', error)
-          localStorage.removeItem('token')
-          setToken(null)
-        }
+        await validateToken(storedToken)
       }
       setLoading(false)
     }
@@ -39,15 +46,30 @@ export const AuthProvider = ({ children }) => {
   const login = async (credentials) => {
     try {
       const response = await authAPI.login(credentials)
-      const { token: newToken, user: userData } = response
       
-      localStorage.setItem('token', newToken)
-      setToken(newToken)
+      let authToken, userData;
+      
+      if (response.data && response.token) {
+        authToken = response.token;
+        userData = response.data;
+      } else if (response.token && response.user) {
+        authToken = response.token;
+        userData = response.user;
+      } else {
+        authToken = response.token;
+        userData = response;
+      }
+      
+      localStorage.setItem('token', authToken)
+      setToken(authToken)
       setUser(userData)
       
       return { success: true, data: response }
     } catch (error) {
-      return { success: false, error: error.message }
+      return { 
+        success: false, 
+        error: error.message || 'فشل في تسجيل الدخول. تحقق من البيانات وحاول مرة أخرى.'
+      }
     }
   }
 
@@ -86,8 +108,14 @@ export const AuthProvider = ({ children }) => {
 
   const updateProfile = async (profileData) => {
     try {
-      const response = await authAPI.updateProfile(profileData)
-      setUser(response)
+      const userId = user?._id
+      
+      if (!userId) {
+        throw new Error('User ID is not available')
+      }
+
+      const response = await authAPI.updateProfile(userId, profileData)
+      setUser(prev => ({ ...prev, ...profileData }))
       return { success: true, data: response }
     } catch (error) {
       return { success: false, error: error.message }
@@ -107,6 +135,10 @@ export const AuthProvider = ({ children }) => {
     return user?.role === 'admin' || user?.isAdmin === true
   }
 
+  const isSuperAdmin = () => {
+    return user?.role === 'SUPER_ADMIN'
+  }
+
   const value = {
     user,
     token,
@@ -119,6 +151,7 @@ export const AuthProvider = ({ children }) => {
     updateProfile,
     updatePassword,
     isAdmin,
+    isSuperAdmin,
     isAuthenticated: !!token && !!user
   }
 
@@ -128,4 +161,3 @@ export const AuthProvider = ({ children }) => {
     </AuthContext.Provider>
   )
 }
-

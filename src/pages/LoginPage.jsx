@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { Eye, EyeOff, Mail, Lock, GraduationCap, ArrowLeft } from 'lucide-react'
@@ -18,18 +18,12 @@ const LoginPage = () => {
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   
-  const { login, isAuthenticated } = useAuth()
+  const { login } = useAuth()
   const { toast } = useToast()
   const navigate = useNavigate()
   const location = useLocation()
 
   const from = location.state?.from?.pathname || '/dashboard'
-
-  useEffect(() => {
-    if (isAuthenticated) {
-      navigate(from, { replace: true })
-    }
-  }, [isAuthenticated, navigate, from])
 
   const handleChange = (e) => {
     setFormData({
@@ -40,6 +34,7 @@ const LoginPage = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    
     setIsLoading(true)
 
     try {
@@ -50,18 +45,46 @@ const LoginPage = () => {
           title: 'تم تسجيل الدخول بنجاح',
           description: 'مرحباً بك في منصة EduMaster'
         })
-        navigate(from, { replace: true })
+        
+        // تحديد دور المستخدم بناءً على البيانات المرتجعة من API مباشرة
+        const userData = result.data?.data || result.data?.user || result.data;
+        const isUserAdmin = userData?.role === 'admin' || userData?.isAdmin === true;
+        const isUserSuperAdmin = userData?.role === 'SUPER_ADMIN'; // التحقق من SUPER_ADMIN
+        
+        // إعادة التوجيه بناءً على صلاحية المستخدم
+        if (isUserSuperAdmin) {
+          navigate('/super-admin', { replace: true });
+        } else if (isUserAdmin) {
+          navigate('/admin', { replace: true });
+        } else {
+          navigate(from, { replace: true });
+        }
       } else {
+        // استخدام رسالة الخطأ التي تأتي من الخادم مباشرة
+        let errorMessage = result.error || 'تحقق من البيانات المدخلة'
+        
+        // رسائل مخصصة لأخطاء محددة من الخادم
+        if (errorMessage.includes('password') || errorMessage.includes('كلمة المرور')) {
+          errorMessage = 'كلمة المرور غير صحيحة'
+        } else if (errorMessage.includes('email') || errorMessage.includes('البريد')) {
+          errorMessage = 'البريد الإلكتروني غير صحيح أو غير مسجل'
+        } else if (errorMessage.includes('انتهت الجلسة')) {
+          errorMessage = 'انتهت جلسة العمل، يرجى تسجيل الدخول مرة أخرى'
+        }
+        
         toast({
           title: 'خطأ في تسجيل الدخول',
-          description: result.error || 'تحقق من البيانات المدخلة',
+          description: errorMessage,
           variant: 'destructive'
         })
       }
     } catch (error) {
+      // معالجة أخطاء الشبكة أو الأخطاء الغير متوقعة
+      let errorDescription = 'تحقق من اتصالك بالإنترنت وحاول مرة أخرى'
+      
       toast({
         title: 'خطأ في الاتصال',
-        description: 'تحقق من اتصالك بالإنترنت وحاول مرة أخرى',
+        description: errorDescription,
         variant: 'destructive'
       })
     } finally {
@@ -205,30 +228,9 @@ const LoginPage = () => {
             </CardContent>
           </Card>
         </motion.div>
-
-        {/* Demo Credentials */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, delay: 0.2 }}
-          className="mt-6"
-        >
-          <Card className="border border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-900/20">
-            <CardContent className="p-4">
-              <h3 className="text-sm font-medium text-blue-800 dark:text-blue-200 mb-2">
-                بيانات تجريبية للاختبار:
-              </h3>
-              <div className="text-xs text-blue-700 dark:text-blue-300 space-y-1">
-                <p>البريد الإلكتروني: student@example.com</p>
-                <p>كلمة المرور: password123</p>
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
       </div>
     </div>
   )
 }
 
 export default LoginPage
-

@@ -1,80 +1,130 @@
 const API_BASE_URL = 'https://edu-master-delta.vercel.app'
 
-// Helper function to get auth headers
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token')
+  if (!token) {
+    return {
+      'Content-Type': 'application/json'
+    }
+  }
+  
   return {
     'Content-Type': 'application/json',
-    ...(token && { token })
+    'Authorization': `Bearer ${token}`,
+    'token': token
   }
 }
 
-// Helper function to handle API responses
 const handleResponse = async (response) => {
+  if (response.status === 401) {
+    localStorage.removeItem('token')
+    const error = new Error('انتهت الجلسة، يرجى تسجيل الدخول مرة أخرى')
+    error.status = 401
+    throw error
+  }
+
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}))
-    throw new Error(errorData.message || `HTTP error! status: ${response.status}`)
+    const errorMessage = errorData.message || errorData.error || `خطأ في الاتصال: ${response.status}`
+    const error = new Error(errorMessage)
+    error.status = response.status
+    throw error
   }
-  return response.json()
+  
+  const data = await response.json()
+  
+  if (data.data !== undefined) {
+    return data.data
+  } else if (data.lessons !== undefined) {
+    return data.lessons
+  } else if (data.exams !== undefined) {
+    return data.exams
+  } else if (data.questions !== undefined) {
+    return data.questions
+  } else if (data.users !== undefined) {
+    return data.users
+  } else if (data.admins !== undefined) {
+    return data.admins
+  }
+  
+  return data
 }
 
-// Helper function to make API requests
 const apiRequest = async (endpoint, options = {}) => {
   const url = `${API_BASE_URL}${endpoint}`
+  const headers = getAuthHeaders()
+  
   const config = {
-    headers: getAuthHeaders(),
+    headers,
     ...options
   }
 
-  const response = await fetch(url, config)
-  return handleResponse(response)
+  // تحويل body إلى JSON إذا كان كائنًا
+  if (options.body && typeof options.body === 'object') {
+    config.body = JSON.stringify(options.body)
+  } else if (options.body) {
+    config.body = options.body
+  }
+
+  try {
+    const response = await fetch(url, config)
+    return await handleResponse(response)
+  } catch (error) {
+    if (error.message === 'انتهت الجلسة، يرجى تسجيل الدخول مرة أخرى') {
+      if (!window.location.pathname.includes('/login')) {
+        window.location.href = '/login'
+      }
+      throw error
+    }
+    throw new Error(error.message || 'حدث خطأ في الاتصال بالخادم')
+  }
 }
 
-// Authentication API
 export const authAPI = {
   login: async (credentials) => {
     return apiRequest('/auth/login', {
       method: 'POST',
-      body: JSON.stringify(credentials)
+      body: credentials
     })
   },
 
   register: async (userData) => {
     return apiRequest('/auth/signup', {
       method: 'POST',
-      body: JSON.stringify(userData)
+      body: userData
     })
   },
 
   forgotPassword: async (email) => {
     return apiRequest('/user/forgot-password', {
       method: 'POST',
-      body: JSON.stringify({ email })
+      body: { email }
     })
   },
 
   resetPassword: async (resetData) => {
     return apiRequest('/user/reset-password', {
       method: 'POST',
-      body: JSON.stringify(resetData)
+      body: resetData
     })
   },
 
   getProfile: async () => {
-    return apiRequest('/user/')
+    const response = await apiRequest('/user/')
+    return response.data || response
   },
 
-  updateProfile: async (profileData) => {
-    return apiRequest('/user/', {
+  updateProfile: async (userId, profileData) => {
+    return apiRequest(`/user/${userId}`, {
       method: 'PUT',
-      body: JSON.stringify(profileData)
+      body: profileData
     })
   },
 
   updatePassword: async (passwordData) => {
     return apiRequest('/user/update-password', {
       method: 'PATCH',
-      body: JSON.stringify(passwordData)
+      body: passwordData
     })
   },
 
@@ -85,10 +135,9 @@ export const authAPI = {
   }
 }
 
-// Lessons API
 export const lessonsAPI = {
-  getAllLessons: async () => {
-    return apiRequest('/lesson/')
+  getAllLessons: async ({ page = 1, limit = 10 } = {}) => {
+    return apiRequest(`/lesson?page=${encodeURIComponent(page)}&limit=${encodeURIComponent(limit)}`)
   },
 
   getLessonById: async (id) => {
@@ -99,24 +148,27 @@ export const lessonsAPI = {
     return apiRequest('/lesson/')
   },
 
+  getUserProgress: async () => {
+    return apiRequest('/lesson/progress')
+  },
+
   payForLesson: async (lessonId) => {
     return apiRequest(`/lesson/pay/${lessonId}`, {
       method: 'POST'
     })
   },
 
-  // Admin only
   createLesson: async (lessonData) => {
     return apiRequest('/lesson', {
       method: 'POST',
-      body: JSON.stringify(lessonData)
+      body: lessonData
     })
   },
 
   updateLesson: async (id, lessonData) => {
     return apiRequest(`/lesson/${id}`, {
       method: 'PUT',
-      body: JSON.stringify(lessonData)
+      body: lessonData
     })
   },
 
@@ -127,14 +179,17 @@ export const lessonsAPI = {
   }
 }
 
-// Exams API
 export const examsAPI = {
-  getAllExams: async () => {
-    return apiRequest('/exam')
+  getAllExams: async ({ page = 1, limit = 10 } = {}) => {
+    return apiRequest(`/exam?page=${encodeURIComponent(page)}&limit=${encodeURIComponent(limit)}`)
   },
 
   getExamById: async (id) => {
     return apiRequest(`/exam/get/${id}`)
+  },
+
+  getUserProgress: async () => {
+    return apiRequest('/studentExam/progress')
   },
 
   startExam: async (examId) => {
@@ -146,7 +201,7 @@ export const examsAPI = {
   submitExam: async (examId, answers) => {
     return apiRequest(`/studentExam/submit/${examId}`, {
       method: 'POST',
-      body: JSON.stringify({ answers })
+      body: answers
     })
   },
 
@@ -162,18 +217,17 @@ export const examsAPI = {
     return apiRequest(`/studentExam/exams/${examId}`)
   },
 
-  // Admin only
   createExam: async (examData) => {
     return apiRequest('/exam', {
       method: 'POST',
-      body: JSON.stringify(examData)
+      body: examData
     })
   },
 
   updateExam: async (id, examData) => {
     return apiRequest(`/exam/${id}`, {
       method: 'PUT',
-      body: JSON.stringify(examData)
+      body: examData
     })
   },
 
@@ -184,28 +238,26 @@ export const examsAPI = {
   }
 }
 
-// Questions API
 export const questionsAPI = {
-  getAllQuestions: async () => {
-    return apiRequest('/question')
+  getAllQuestions: async ({ page = 1, limit = 10 } = {}) => {
+    return apiRequest(`/question?page=${encodeURIComponent(page)}&limit=${encodeURIComponent(limit)}`)
   },
 
   getQuestionById: async (id) => {
     return apiRequest(`/question/get/${id}`)
   },
 
-  // Admin only
   createQuestion: async (questionData) => {
     return apiRequest('/question', {
       method: 'POST',
-      body: JSON.stringify(questionData)
+      body: questionData
     })
   },
 
   updateQuestion: async (id, questionData) => {
     return apiRequest(`/question/${id}`, {
       method: 'PUT',
-      body: JSON.stringify(questionData)
+      body: questionData
     })
   },
 
@@ -216,12 +268,11 @@ export const questionsAPI = {
   }
 }
 
-// Admin API
 export const adminAPI = {
   createAdmin: async (adminData) => {
     return apiRequest('/admin/create-admin', {
       method: 'POST',
-      body: JSON.stringify(adminData)
+      body: adminData
     })
   },
 
@@ -231,6 +282,30 @@ export const adminAPI = {
 
   getAllUsers: async () => {
     return apiRequest('/admin/all-user')
+  },
+
+  deleteUser: async (userId) => {
+    return apiRequest(`/admin/delete-user/${userId}`, {
+      method: 'DELETE'
+    })
+  },
+
+  promoteToAdmin: async (userId) => {
+    return apiRequest(`/admin/promote-to-admin/${userId}`, {
+      method: 'PUT'
+    })
+  },
+
+  demoteToUser: async (adminId) => {
+    return apiRequest(`/admin/demote-to-user/${adminId}`, {
+      method: 'PUT'
+    })
+  },
+
+  deleteAdmin: async (adminId) => {
+    return apiRequest(`/admin/delete-admin/${adminId}`, {
+      method: 'DELETE'
+    })
   }
 }
 
@@ -241,4 +316,3 @@ export default {
   questionsAPI,
   adminAPI
 }
-

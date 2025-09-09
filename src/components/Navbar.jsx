@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
@@ -14,7 +14,11 @@ import {
   Sun,
   Moon,
   Bell,
-  Search
+  Search,
+  CheckCircle,
+  AlertCircle,
+  Info,
+  XCircle
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -30,19 +34,63 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { useAuth } from '../contexts/AuthContext'
 import { useTheme } from '../contexts/ThemeContext'
+import { useNotifications } from '../contexts/NotificationsContext'
 
 const Navbar = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [showNotifications, setShowNotifications] = useState(false)
   
   const { user, logout, isAdmin } = useAuth()
   const { theme, toggleTheme } = useTheme()
+  const { notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications()
   const location = useLocation()
   const navigate = useNavigate()
+  const notificationsRef = useRef(null)
 
   const handleLogout = () => {
     logout()
     navigate('/')
+  }
+
+  // إغلاق قائمة الإشعارات عند النقر خارجها
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (notificationsRef.current && !notificationsRef.current.contains(event.target)) {
+        setShowNotifications(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [])
+
+  const handleNotificationClick = (id) => {
+    markAsRead(id)
+    setShowNotifications(false)
+  }
+
+  const handleMarkAllAsRead = () => {
+    markAllAsRead()
+  }
+
+  const getNotificationIcon = (type) => {
+    switch (type) {
+      case 'success':
+        return <CheckCircle className="h-5 w-5 text-green-500" />
+      case 'warning':
+        return <AlertCircle className="h-5 w-5 text-yellow-500" />
+      case 'error':
+        return <AlertCircle className="h-5 w-5 text-red-500" />
+      case 'lesson':
+        return <BookOpen className="h-5 w-5 text-blue-500" />
+      case 'exam':
+        return <FileText className="h-5 w-5 text-purple-500" />
+      default:
+        return <Info className="h-5 w-5 text-blue-500" />
+    }
   }
 
   const navigationItems = [
@@ -65,11 +113,6 @@ const Navbar = () => {
 
   const adminNavigationItems = [
     {
-      name: 'لوحة الإدارة',
-      href: '/admin',
-      icon: Settings
-    },
-    {
       name: 'إدارة الدروس',
       href: '/admin/lessons',
       icon: BookOpen
@@ -77,6 +120,11 @@ const Navbar = () => {
     {
       name: 'إدارة الامتحانات',
       href: '/admin/exams',
+      icon: FileText
+    },
+    {
+      name: 'إدارة الأسئلة',
+      href: '/admin/questions',
       icon: FileText
     },
     {
@@ -191,12 +239,79 @@ const Navbar = () => {
             </Button>
 
             {/* Notifications */}
-            <Button variant="ghost" size="sm" className="p-2 relative">
-              <Bell className="h-4 w-4" />
-              <Badge className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center p-0 text-xs">
-                3
-              </Badge>
-            </Button>
+            <div className="relative" ref={notificationsRef}>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="p-2 relative"
+                onClick={() => setShowNotifications(!showNotifications)}
+              >
+                <Bell className="h-4 w-4" />
+                {unreadCount > 0 && (
+                  <Badge className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center p-0 text-xs">
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </Badge>
+                )}
+              </Button>
+
+              {/* Notifications Dropdown */}
+              {showNotifications && (
+                <div className="absolute right-0 mt-2 w-80 bg-white dark:bg-gray-800 rounded-md shadow-lg overflow-hidden z-50 border border-gray-200 dark:border-gray-700">
+                  <div className="p-3 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+                    <h3 className="font-semibold">الإشعارات</h3>
+                    {unreadCount > 0 && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleMarkAllAsRead}
+                      >
+                        تعيين الكل كمقروء
+                      </Button>
+                    )}
+                  </div>
+
+                  <div className="max-h-96 overflow-y-auto">
+                    {notifications.length === 0 ? (
+                      <div className="p-4 text-center text-gray-500 dark:text-gray-400">
+                        لا توجد إشعارات
+                      </div>
+                    ) : (
+                      notifications.map(notification => (
+                        <div
+                          key={notification.id}
+                          className={`p-3 border-b border-gray-100 dark:border-gray-700 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 ${
+                            !notification.read ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                          }`}
+                          onClick={() => handleNotificationClick(notification.id)}
+                        >
+                          <div className="flex items-start">
+                            <div className="flex-shrink-0 mt-1">
+                              {getNotificationIcon(notification.type)}
+                            </div>
+                            <div className="ml-3 flex-1">
+                              <p className="text-sm font-medium text-gray-900 dark:text-white">
+                                {notification.title}
+                              </p>
+                              <p className="text-sm text-gray-500 dark:text-gray-300 mt-1">
+                                {notification.message}
+                              </p>
+                              <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                                {new Date(notification.timestamp).toLocaleString('ar-EG')}
+                              </p>
+                            </div>
+                            {!notification.read && (
+                              <div className="flex-shrink-0">
+                                <div className="h-2 w-2 rounded-full bg-blue-500"></div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
 
             {/* User Menu */}
             <DropdownMenu>
@@ -347,4 +462,3 @@ const Navbar = () => {
 }
 
 export default Navbar
-

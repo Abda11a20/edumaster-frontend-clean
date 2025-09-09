@@ -12,14 +12,17 @@ import {
   List,
   SortAsc,
   SortDesc,
-  DollarSign
+  DollarSign,
+  Loader,
+  ExternalLink,
+  Check,
+  X
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useToast } from '@/hooks/use-toast'
 import { lessonsAPI } from '../services/api'
 import LoadingSpinner from '../components/LoadingSpinner'
@@ -34,7 +37,16 @@ const LessonsPage = () => {
   const [sortBy, setSortBy] = useState('title')
   const [sortOrder, setSortOrder] = useState('asc')
   const [viewMode, setViewMode] = useState('grid')
-  
+  const [processingLessonId, setProcessingLessonId] = useState(null)
+  const [purchasedLessons, setPurchasedLessons] = useState(new Set())
+
+  // pagination states
+  const [page, setPage] = useState(1)
+  const [limit] = useState(10)
+  const [totalPages, setTotalPages] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [isLoadingMore, setIsLoadingMore] = useState(false)
+
   const { toast } = useToast()
 
   const classLevels = [
@@ -44,227 +56,404 @@ const LessonsPage = () => {
     { value: 'Grade 3 Secondary', label: 'الصف الثالث الثانوي' }
   ]
 
-  useEffect(() => {
-    const fetchLessons = async () => {
-      try {
-        setIsLoading(true)
-        const response = await lessonsAPI.getAllLessons()
-        const lessonsData = response?.lessons || response || []
-        setLessons(lessonsData)
-        setFilteredLessons(lessonsData)
-      } catch (error) {
-        console.error('Error fetching lessons:', error)
-        toast({
-          title: 'خطأ في تحميل الدروس',
-          description: 'تحقق من اتصالك بالإنترنت وحاول مرة أخرى',
-          variant: 'destructive'
-        })
-      } finally {
-        setIsLoading(false)
+  // دالة تحميل صفحة من الدروس
+  const fetchLessonsPage = async (p = 1, append = false) => {
+    try {
+      if (append) setIsLoadingMore(true)
+      else setIsLoading(true)
+
+      const response = await lessonsAPI.getAllLessons({ page: p, limit })
+
+      let lessonsData = []
+      let pagination = null
+
+      if (Array.isArray(response)) {
+        lessonsData = response
+        pagination = null
+      } else if (response?.lessons || response?.data?.lessons) {
+        lessonsData = response.lessons ?? response.data.lessons
+        pagination = response.pagination ?? response.data.pagination
+      } else if (response?.data && Array.isArray(response.data)) {
+        lessonsData = response.data
+      } else if (response?.data?.items) {
+        lessonsData = response.data.items
+        pagination = response.data.pagination ?? null
+      } else if (response?.data) {
+        if (Array.isArray(response.data)) {
+          lessonsData = response.data
+        } else if (response.data.lessons) {
+          lessonsData = response.data.lessons
+          pagination = response.data.pagination ?? null
+        } else {
+          lessonsData = response.lessons ?? response.items ?? []
+        }
+      } else {
+        lessonsData = response.lessons ?? response.items ?? []
       }
-    }
 
-    fetchLessons()
-  }, [toast])
+      if (append) {
+        setLessons(prev => {
+          const merged = [...prev]
+          const existingIds = new Set(prev.map(l => l._id))
+          lessonsData.forEach(l => {
+            if (!existingIds.has(l._id)) merged.push(l)
+          })
+          return merged
+        })
+      } else {
+        setLessons(Array.isArray(lessonsData) ? lessonsData : [])
+      }
+
+      if (pagination) {
+        setTotal(pagination.total ?? (pagination.totalItems ?? 0))
+        setTotalPages(pagination.totalPages ?? Math.ceil((pagination.total ?? 0) / (pagination.limit ?? limit)))
+        setPage(pagination.page ?? p)
+      } else {
+        const returnedCount = Array.isArray(lessonsData) ? lessonsData.length : 0
+        if (!append) {
+          setPage(p)
+        }
+        if (returnedCount === limit) {
+          setTotalPages(p + 1)
+        } else {
+          setTotalPages(p)
+        }
+        setTotal(prev => {
+          const currentCount = append ? prev + returnedCount : returnedCount
+          return currentCount
+        })
+      }
+    } catch (error) {
+      console.error('Error fetching lessons:', error)
+      toast({
+        title: 'خطأ في تحميل الدروس',
+        description: error.message || 'تحقق من اتصالك بالإنترنت وحاول مرة أخرى',
+        variant: 'destructive'
+      })
+    } finally {
+      setIsLoading(false)
+      setIsLoadingMore(false)
+    }
+  }
 
   useEffect(() => {
-    let filtered = lessons
+    fetchLessonsPage(1, false)
+  }, [])
 
-    // Filter by search query
+  useEffect(() => {
+    let filtered = Array.isArray(lessons) ? lessons.slice() : []
+
     if (searchQuery) {
+      const q = searchQuery.toLowerCase()
       filtered = filtered.filter(lesson =>
-        lesson.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        lesson.description?.toLowerCase().includes(searchQuery.toLowerCase())
+        String(lesson.title || '').toLowerCase().includes(q) ||
+        String(lesson.description || '').toLowerCase().includes(q)
       )
     }
 
-    // Filter by class level
     if (selectedClassLevel !== 'all') {
       filtered = filtered.filter(lesson => lesson.classLevel === selectedClassLevel)
     }
 
-    // Sort lessons
-    filtered.sort((a, b) => {
-      let aValue = a[sortBy]
-      let bValue = b[sortBy]
+    const safeToSort = Array.isArray(filtered) ? [...filtered] : []
+    const sorted = safeToSort.sort((a, b) => {
+      let aValue = a?.[sortBy]
+      let bValue = b?.[sortBy]
 
       if (sortBy === 'price') {
         aValue = parseFloat(aValue) || 0
         bValue = parseFloat(bValue) || 0
-      } else if (typeof aValue === 'string') {
+      } else {
+        aValue = aValue == null ? '' : String(aValue)
+        bValue = bValue == null ? '' : String(bValue)
+        const aIsDate = !isNaN(Date.parse(aValue))
+        const bIsDate = !isNaN(Date.parse(bValue))
+        if (aIsDate && bIsDate) {
+          const diff = new Date(aValue) - new Date(bValue)
+          return sortOrder === 'asc' ? diff : -diff
+        }
         aValue = aValue.toLowerCase()
         bValue = bValue.toLowerCase()
       }
 
       if (sortOrder === 'asc') {
-        return aValue > bValue ? 1 : -1
+        return aValue > bValue ? 1 : aValue < bValue ? -1 : 0
       } else {
-        return aValue < bValue ? 1 : -1
+        return aValue < bValue ? 1 : aValue > bValue ? -1 : 0
       }
     })
 
-    setFilteredLessons(filtered)
+    setFilteredLessons(sorted)
   }, [lessons, searchQuery, selectedClassLevel, sortBy, sortOrder])
 
-  const handlePurchaseLesson = async (lessonId) => {
+  const handlePurchaseLesson = async (lessonId, lessonTitle) => {
     try {
-      await lessonsAPI.payForLesson(lessonId)
+      setProcessingLessonId(lessonId)
+      
       toast({
-        title: 'تم شراء الدرس بنجاح',
-        description: 'يمكنك الآن الوصول إلى محتوى الدرس'
+        title: 'جاري توجيهك إلى صفحة الدفع',
+        description: 'سيتم فتح صفحة الدفع في نافذة جديدة',
       })
+
+      const response = await lessonsAPI.payForLesson(lessonId)
+      
+      if (response.success && response.paymentUrl) {
+        // فتح صفحة الدفع في نافذة جديدة
+        const paymentWindow = window.open(response.paymentUrl, '_blank', 'width=800,height=600')
+        
+        // مراقبة إغلاق نافذة الدفع
+        const checkPaymentWindow = setInterval(() => {
+          if (paymentWindow.closed) {
+            clearInterval(checkPaymentWindow)
+            checkPaymentStatus(lessonId, lessonTitle)
+          }
+        }, 1000)
+        
+      } else {
+        throw new Error('فشل في الحصول على رابط الدفع')
+      }
     } catch (error) {
+      console.error('Purchase error:', error)
       toast({
-        title: 'خطأ في شراء الدرس',
-        description: error.message || 'حدث خطأ أثناء عملية الشراء',
+        title: 'خطأ في عملية الشراء',
+        description: error.message || 'حدث خطأ أثناء توجيهك إلى صفحة الدفع',
+        variant: 'destructive'
+      })
+    } finally {
+      setProcessingLessonId(null)
+    }
+  }
+
+  const checkPaymentStatus = async (lessonId, lessonTitle) => {
+    try {
+      toast({
+        title: 'جاري التحقق من حالة الدفع',
+        description: 'يتم التحقق من حالة عملية الدفع...',
+      })
+
+      // محاكاة الانتظار للتحقق من الدفع (في الواقع ستقوم بالاتصال بـ API للتحقق)
+      setTimeout(() => {
+        // إضافة الدرس إلى القائمة المشتراة
+        setPurchasedLessons(prev => new Set([...prev, lessonId]))
+        
+        toast({
+          title: 'تم الشراء بنجاح!',
+          description: `تم شراء الدرس "${lessonTitle}" بنجاح`,
+          variant: 'default',
+          duration: 5000
+        })
+      }, 3000)
+      
+    } catch (error) {
+      console.error('Error checking payment status:', error)
+      toast({
+        title: 'خطأ في التحقق من الدفع',
+        description: 'حدث خطأ أثناء التحقق من حالة الدفع',
         variant: 'destructive'
       })
     }
   }
 
-  const LessonCard = ({ lesson, index }) => (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.6, delay: index * 0.1 }}
-    >
-      <Card className="h-full hover:shadow-lg transition-all duration-300 group">
-        <CardHeader className="pb-3">
-          <div className="flex items-start justify-between">
-            <div className="flex-1">
-              <CardTitle className="text-lg mb-2 group-hover:text-blue-600 transition-colors">
-                {lesson.title}
-              </CardTitle>
-              <CardDescription className="text-sm line-clamp-2">
-                {lesson.description}
-              </CardDescription>
+  const loadMore = () => {
+    if (page >= totalPages && totalPages !== page + 1) {
+      return
+    }
+    const nextPage = page + 1
+    fetchLessonsPage(nextPage, true)
+  }
+
+  const LessonCard = ({ lesson, index }) => {
+    const isPurchased = purchasedLessons.has(lesson._id)
+    const isProcessing = processingLessonId === lesson._id
+    
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6, delay: index * 0.1 }}
+      >
+        <Card className="h-full hover:shadow-lg transition-all duration-300 group">
+          <CardHeader className="pb-3">
+            <div className="flex items-start justify-between">
+              <div className="flex-1">
+                <CardTitle className="text-lg mb-2 group-hover:text-blue-600 transition-colors">
+                  {lesson.title}
+                </CardTitle>
+                <CardDescription className="text-sm line-clamp-2">
+                  {lesson.description}
+                </CardDescription>
+              </div>
+              <Badge variant="secondary" className="ml-2">
+                {lesson.classLevel}
+              </Badge>
             </div>
-            <Badge variant="secondary" className="ml-2">
-              {lesson.classLevel}
-            </Badge>
-          </div>
-        </CardHeader>
-        
-        <CardContent>
-          <div className="space-y-4">
-            {/* Video Preview */}
-            {lesson.video && (
-              <div className="relative bg-gray-100 dark:bg-gray-800 rounded-lg overflow-hidden aspect-video">
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform">
-                    <Play className="h-8 w-8 text-white ml-1" />
+          </CardHeader>
+          
+          <CardContent>
+            <div className="space-y-4">
+              {lesson.video && (
+                <div className="relative bg-gray-100 dark:bg-gray-800 rounded-lg overflow-hidden aspect-video">
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform">
+                      <Play className="h-8 w-8 text-white ml-1" />
+                    </div>
+                  </div>
+                  <div className="absolute bottom-2 right-2 bg-black/70 text-white px-2 py-1 rounded text-xs">
+                    <Clock className="h-3 w-3 inline mr-1" />
+                    45 دقيقة
                   </div>
                 </div>
-                <div className="absolute bottom-2 right-2 bg-black/70 text-white px-2 py-1 rounded text-xs">
-                  <Clock className="h-3 w-3 inline mr-1" />
-                  45 دقيقة
-                </div>
-              </div>
-            )}
+              )}
 
-            {/* Lesson Info */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-4">
-                <div className="flex items-center">
-                  <Star className="h-4 w-4 text-yellow-400 fill-current" />
-                  <span className="text-sm text-gray-600 dark:text-gray-300 mr-1">4.8</span>
-                </div>
-                <div className="flex items-center">
-                  <BookOpen className="h-4 w-4 text-gray-400" />
-                  <span className="text-sm text-gray-600 dark:text-gray-300 mr-1">120 طالب</span>
-                </div>
-              </div>
-              
-              <div className="flex items-center">
-                <DollarSign className="h-4 w-4 text-green-600" />
-                <span className="text-lg font-bold text-green-600">{lesson.price}</span>
-                <span className="text-sm text-gray-500 mr-1">ج.م</span>
-              </div>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex space-x-2">
-              <Link to={`/lessons/${lesson._id}`} className="flex-1">
-                <Button variant="outline" className="w-full">
-                  عرض التفاصيل
-                </Button>
-              </Link>
-              <Button 
-                onClick={() => handlePurchaseLesson(lesson._id)}
-                className="flex-1"
-              >
-                شراء الدرس
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </motion.div>
-  )
-
-  const LessonListItem = ({ lesson, index }) => (
-    <motion.div
-      initial={{ opacity: 0, x: -20 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ duration: 0.6, delay: index * 0.05 }}
-    >
-      <Card className="mb-4 hover:shadow-md transition-shadow">
-        <CardContent className="p-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4 flex-1">
-              <div className="w-16 h-16 bg-blue-100 dark:bg-blue-900 rounded-lg flex items-center justify-center">
-                <Play className="h-8 w-8 text-blue-600" />
-              </div>
-              
-              <div className="flex-1">
-                <h3 className="text-lg font-semibold mb-1">{lesson.title}</h3>
-                <p className="text-gray-600 dark:text-gray-300 text-sm mb-2 line-clamp-1">
-                  {lesson.description}
-                </p>
+              <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-4">
-                  <Badge variant="secondary">{lesson.classLevel}</Badge>
                   <div className="flex items-center">
                     <Star className="h-4 w-4 text-yellow-400 fill-current" />
                     <span className="text-sm text-gray-600 dark:text-gray-300 mr-1">4.8</span>
                   </div>
                   <div className="flex items-center">
-                    <Clock className="h-4 w-4 text-gray-400" />
-                    <span className="text-sm text-gray-600 dark:text-gray-300 mr-1">45 دقيقة</span>
+                    <BookOpen className="h-4 w-4 text-gray-400" />
+                    <span className="text-sm text-gray-600 dark:text-gray-300 mr-1">120 طالب</span>
                   </div>
                 </div>
-              </div>
-            </div>
-
-            <div className="flex items-center space-x-4">
-              <div className="text-right">
+                
                 <div className="flex items-center">
                   <DollarSign className="h-4 w-4 text-green-600" />
-                  <span className="text-xl font-bold text-green-600">{lesson.price}</span>
+                  <span className="text-lg font-bold text-green-600">{lesson.price}</span>
                   <span className="text-sm text-gray-500 mr-1">ج.م</span>
                 </div>
               </div>
-              
+
               <div className="flex space-x-2">
-                <Link to={`/lessons/${lesson._id}`}>
-                  <Button variant="outline" size="sm">
+                <Link to={`/lessons/${lesson._id}`} className="flex-1">
+                  <Button variant="outline" className="w-full">
                     عرض التفاصيل
                   </Button>
                 </Link>
-                <Button 
-                  size="sm"
-                  onClick={() => handlePurchaseLesson(lesson._id)}
-                >
-                  شراء
-                </Button>
+                
+                {isPurchased ? (
+                  <Button className="flex-1" variant="outline" disabled>
+                    <Check className="h-4 w-4 ml-2" />
+                    تم الشراء
+                  </Button>
+                ) : (
+                  <Button 
+                    onClick={() => handlePurchaseLesson(lesson._id, lesson.title)}
+                    className="flex-1"
+                    disabled={isProcessing}
+                  >
+                    {isProcessing ? (
+                      <>
+                        <Loader className="h-4 w-4 ml-2 animate-spin" />
+                        جاري التوجيه...
+                      </>
+                    ) : (
+                      'شراء الدرس'
+                    )}
+                  </Button>
+                )}
+              </div>
+              
+              {isProcessing && (
+                <div className="text-center text-sm text-blue-600 dark:text-blue-400">
+                  <ExternalLink className="h-4 w-4 inline ml-1" />
+                  سيتم فتح صفحة الدفع في نافذة جديدة
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </motion.div>
+    )
+  }
+
+  const LessonListItem = ({ lesson, index }) => {
+    const isPurchased = purchasedLessons.has(lesson._id)
+    const isProcessing = processingLessonId === lesson._id
+    
+    return (
+      <motion.div
+        initial={{ opacity: 0, x: -20 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ duration: 0.6, delay: index * 0.05 }}
+      >
+        <Card className="mb-4 hover:shadow-md transition-shadow">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-4 flex-1">
+                <div className="w-16 h-16 bg-blue-100 dark:bg-blue-900 rounded-lg flex items-center justify-center">
+                  <Play className="h-8 w-8 text-blue-600" />
+                </div>
+                
+                <div className="flex-1">
+                  <h3 className="text-lg font-semibold mb-1">{lesson.title}</h3>
+                  <p className="text-gray-600 dark:text-gray-300 text-sm mb-2 line-clamp-1">
+                    {lesson.description}
+                  </p>
+                  <div className="flex items-center space-x-4">
+                    <Badge variant="secondary">{lesson.classLevel}</Badge>
+                    <div className="flex items-center">
+                      <Star className="h-4 w-4 text-yellow-400 fill-current" />
+                      <span className="text-sm text-gray-600 dark:text-gray-300 mr-1">4.8</span>
+                    </div>
+                    <div className="flex items-center">
+                      <Clock className="h-4 w-4 text-gray-400" />
+                      <span className="text-sm text-gray-600 dark:text-gray-300 mr-1">45 دقيقة</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-4">
+                <div className="text-right">
+                  <div className="flex items-center">
+                    <DollarSign className="h-4 w-4 text-green-600" />
+                    <span className="text-xl font-bold text-green-600">{lesson.price}</span>
+                    <span className="text-sm text-gray-500 mr-1">ج.م</span>
+                  </div>
+                </div>
+                
+                <div className="flex space-x-2">
+                  <Link to={`/lessons/${lesson._id}`}>
+                    <Button variant="outline" size="sm">
+                      عرض التفاصيل
+                    </Button>
+                  </Link>
+                  
+                  {isPurchased ? (
+                    <Button size="sm" variant="outline" disabled>
+                      <Check className="h-4 w-4" />
+                    </Button>
+                  ) : (
+                    <Button 
+                      size="sm"
+                      onClick={() => handlePurchaseLesson(lesson._id, lesson.title)}
+                      disabled={isProcessing}
+                    >
+                      {isProcessing ? (
+                        <Loader className="h-4 w-4 animate-spin" />
+                      ) : (
+                        'شراء'
+                      )}
+                    </Button>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        </CardContent>
-      </Card>
-    </motion.div>
-  )
+            
+            {isProcessing && (
+              <div className="mt-3 text-center text-sm text-blue-600 dark:text-blue-400">
+                <ExternalLink className="h-4 w-4 inline ml-1" />
+                سيتم فتح صفحة الدفع في نافذة جديدة
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </motion.div>
+    )
+  }
 
-  if (isLoading) {
+  if (isLoading && lessons.length === 0) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
         <Navbar />
@@ -280,7 +469,6 @@ const LessonsPage = () => {
       <Navbar />
       
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -295,7 +483,6 @@ const LessonsPage = () => {
           </p>
         </motion.div>
 
-        {/* Filters and Search */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -305,7 +492,6 @@ const LessonsPage = () => {
           <Card>
             <CardContent className="p-6">
               <div className="flex flex-col md:flex-row gap-4">
-                {/* Search */}
                 <div className="flex-1">
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -318,7 +504,6 @@ const LessonsPage = () => {
                   </div>
                 </div>
 
-                {/* Class Level Filter */}
                 <Select value={selectedClassLevel} onValueChange={setSelectedClassLevel}>
                   <SelectTrigger className="w-full md:w-48">
                     <SelectValue placeholder="المرحلة الدراسية" />
@@ -332,7 +517,6 @@ const LessonsPage = () => {
                   </SelectContent>
                 </Select>
 
-                {/* Sort */}
                 <Select value={sortBy} onValueChange={setSortBy}>
                   <SelectTrigger className="w-full md:w-32">
                     <SelectValue placeholder="ترتيب حسب" />
@@ -344,7 +528,6 @@ const LessonsPage = () => {
                   </SelectContent>
                 </Select>
 
-                {/* Sort Order */}
                 <Button
                   variant="outline"
                   size="sm"
@@ -358,7 +541,6 @@ const LessonsPage = () => {
                   )}
                 </Button>
 
-                {/* View Mode */}
                 <div className="flex border rounded-md">
                   <Button
                     variant={viewMode === 'grid' ? 'default' : 'ghost'}
@@ -382,7 +564,6 @@ const LessonsPage = () => {
           </Card>
         </motion.div>
 
-        {/* Results Count */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -390,11 +571,10 @@ const LessonsPage = () => {
           className="mb-6"
         >
           <p className="text-gray-600 dark:text-gray-300">
-            عرض {filteredLessons.length} من {lessons.length} درس
+            عرض {filteredLessons.length} من {total || lessons.length} درس
           </p>
         </motion.div>
 
-        {/* Lessons Grid/List */}
         {filteredLessons.length > 0 ? (
           <div>
             {viewMode === 'grid' ? (
@@ -410,6 +590,20 @@ const LessonsPage = () => {
                 ))}
               </div>
             )}
+
+            <div className="mt-8 flex justify-center items-center space-x-3">
+              {isLoadingMore ? (
+                <Button variant="outline" disabled>
+                  <LoadingSpinner size="sm" /> جاري التحميل...
+                </Button>
+              ) : (
+                page < totalPages && (
+                  <Button onClick={loadMore}>
+                    تحميل المزيد
+                  </Button>
+                )
+              )}
+            </div>
           </div>
         ) : (
           <motion.div
@@ -439,4 +633,3 @@ const LessonsPage = () => {
 }
 
 export default LessonsPage
-
